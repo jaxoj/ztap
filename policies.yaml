@@ -1,0 +1,7 @@
+policies:
+  - role: "field_officer"
+    path: "/api/v1/intel"
+    methods: ["GET"]
+  - role: "commander"
+    path: "/api/v1/launch"
+    methods: ["POST"]
