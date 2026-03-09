@@ -49,7 +49,7 @@ func main() {
 	log.Printf("Initializing Zero-Trust Access Poxy (ZTAP)...")
 
 	// ==========================================
-	// 1. Load the Identity Provider's Public Key
+	// Load the Identity Provider's Public Key
 	// ==========================================
 	// This is used to mathematically verify JWT signatures.
 	publicKey, err := loadPublicKey(os.Getenv("RSA_PUBLIC_KEY_PATH"))
@@ -58,10 +58,10 @@ func main() {
 	}
 
 	// ==========================================
-	// 2. Connect to the Stateful Token Cache (Redis)
+	// Connect to the Stateful Token Cache (Redis)
 	// ==========================================
 	// Used for instantly revoking compromised sessions.
-	redisURL := os.Getenv("REDIS_URL")
+	redisURL := os.Getenv("REDIS_STORE_URL")
 	if redisURL == "" {
 		redisURL = "redis://localhost:6379/0" // Default for local testing
 	}
@@ -79,7 +79,7 @@ func main() {
 	log.Println("RBAC policies loaded successfully.")
 
 	// ==========================================
-	// 4. Configure the mTLS Network Transport
+	// Configure the mTLS Network Transport
 	// ==========================================
 	// This ensures we encrypt traffic to the microservices and prove our identity.
 	mtlsTransport, err := proxy.NewMTLSTransport(
@@ -92,7 +92,7 @@ func main() {
 	}
 
 	// ==========================================
-	// 5. Initialize the Core Reverse Proxy
+	// Initialize the Core Reverse Proxy
 	// ==========================================
 	// Define where authorized traffic should be forwarded.
 	targetURL, _ := url.Parse("https://localhost:8443") // The protected internal microservice
@@ -107,7 +107,7 @@ func main() {
 	}
 
 	// ==========================================
-	// 6. Wrap the Proxy in our ZTAP Middleware
+	// Wrap the Proxy in our ZTAP Middleware
 	// ==========================================
 	gateway := &auth.ZTAPGateway{
 		PublicKey:  publicKey,
@@ -119,7 +119,7 @@ func main() {
 	secureHandler := gateway.Authorize(reverseProxy)
 
 	// ==========================================
-	// 7. Start the Secure HTTPS Server
+	// Start the Secure HTTPS Server
 	// ==========================================
 	server := &http.Server{
 		Addr:         ":443", // Standard HTTPS port
@@ -131,7 +131,7 @@ func main() {
 
 	log.Println("ZTAP Gateway is listening on port 443 (HTTPS)...")
 	// ZTAP itself listens on TLS using its own server certificates (front-end encryption)
-	err = server.ListenAndServeTLS(os.Getenv("SERVER_CERT_PATH"), os.Getenv("SERVER_KEY_PATH"))
+	err = server.ListenAndServeTLS(os.Getenv("PROXY_KEY_PATH"), os.Getenv("PROXY_KEY_PATH"))
 	if err != nil {
 		log.Fatalf("Fatal: Server crashed: %v", err)
 	}
