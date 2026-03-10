@@ -13,6 +13,7 @@ type contextKey string
 
 const RoleContextKey contextKey = "role"
 const SubContextKey contextKey = "sub"
+const TargetContextKey contextKey = "target_backend"
 
 // ZTAPGateway holds the dependencies for our proxy middleware
 type ZTAPGateway struct {
@@ -44,13 +45,15 @@ func (g *ZTAPGateway) Authorize(next http.Handler) http.Handler {
 		role, _ := claims["role"].(string)
 		sub, _ := claims["sub"].(string)
 
-		if !g.RBACEngine.IsAllowed(role, r.URL.Path, r.Method) {
-			http.Error(w, "ZTAP Denied: Insufficient clearence for this opperation", http.StatusForbidden)
+		backendURL, allowed := g.RBACEngine.MapRequest(role, r.URL.Path, r.Method)
+		if !allowed {
+			http.Error(w, "ZTAP Denied: Insufficient clearance", http.StatusForbidden)
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), RoleContextKey, role)
 		ctx = context.WithValue(ctx, SubContextKey, sub)
+		ctx = context.WithValue(ctx, TargetContextKey, backendURL)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

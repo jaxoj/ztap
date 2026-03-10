@@ -1,0 +1,18 @@
+policies:
+  # Allows /api/v1/intel, /api/v1/intel/map, /api/v1/intel/assets/123, etc.
+  - role: "field_officer"
+    path: "^/api/v1/intel/.*"
+    methods: ["GET"]
+    backend: "https://intel-service.internal:8443"
+
+  # STRICT MATCH: Only exactly /api/v1/launch is allowed. No sub-paths.
+  - role: "commander"
+    path: "^/api/v1/launch$" 
+    methods: ["POST"]
+    backend: "https://missile-service.internal:8443"
+
+  # Matches a specific pattern, e.g., /api/v1/drones/alpha-1/status
+  - role: "drone_operator"
+    path: "^/api/v1/drones/[a-z0-9-]+/status$"
+    methods: ["GET", "PUT"]
+    backend: "https://drone-control.internal:8443"
