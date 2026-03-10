@@ -58,10 +58,14 @@ func TestZTAPGetway_Authorize(t *testing.T) {
 	}
 
 	rules := []policy.Rule{
-		{Role: "field_officer", Path: "/api/v1/intel", Methods: []string{"GET"}},
-		{Role: "commander", Path: "/api/v1/launch", Methods: []string{"POST"}},
+		{Role: "field_officer", Path: "^/api/v1/intel$", Methods: []string{"GET"}, Backend: "https://mock-backend"},
+		{Role: "commander", Path: "^/api/v1/launch$", Methods: []string{"POST"}, Backend: "https://mock-backend"},
 	}
-	rbacEngine := policy.NewEngine(rules)
+
+	rbacEngine, err := policy.NewEngine(rules)
+	if err != nil {
+		t.Fatalf("Failed to initialize RBAC engine: %v", err)
+	}
 
 	gateway := &auth.ZTAPGateway{
 		PublicKey:  publicKey,

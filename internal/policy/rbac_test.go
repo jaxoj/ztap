@@ -25,7 +25,10 @@ func TestRBACEngine(t *testing.T) {
 		},
 	}
 
-	engine := policy.NewEngine(rules)
+	engine, err := policy.NewEngine(rules)
+	if err != nil {
+		t.Fatalf("Failed to create RBAC engine: %v", err)
+	}
 
 	tests := []struct {
 		name           string
@@ -44,7 +47,7 @@ func TestRBACEngine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := engine.IsAllowed(tt.role, tt.path, tt.method)
+			_, result := engine.MapRequest(tt.role, tt.path, tt.method)
 			if result != tt.expectedResult {
 				t.Errorf("Expected %v, got %v", tt.expectedResult, result)
 			}

@@ -66,9 +66,14 @@ func TestEndToEndAuthorizationFlow(t *testing.T) {
 	backendURL, _ := url.Parse(backend.URL)
 
 	reverseProxy := httputil.NewSingleHostReverseProxy(backendURL)
-	rbacEngine := policy.NewEngine([]policy.Rule{
-		{Role: "commander", Path: "/api/v1/launch", Methods: []string{"POST"}},
-	})
+
+	rules := []policy.Rule{
+		{Role: "commander", Path: "^/api/v1/launch$", Methods: []string{"POST"}, Backend: backendURL.String()},
+	}
+	rbacEngine, err := policy.NewEngine(rules)
+	if err != nil {
+		t.Fatalf("Failed to initialize RBAC engine: %v", err)
+	}
 
 	gateway := &auth.ZTAPGateway{
 		PublicKey:  pubKey,

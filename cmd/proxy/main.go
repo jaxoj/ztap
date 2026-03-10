@@ -75,7 +75,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Fatal: Could not load RBAC policies: %v", err)
 	}
-	rbacEngine := policy.NewEngine(rbacConfig.Policies)
+	rbacEngine, err := policy.NewEngine(rbacConfig.Policies)
+	if err != nil {
+		log.Fatalf("Fatal: Could not initialize RBAC engine: %v", err)
+	}
 	log.Println("RBAC policies loaded successfully.")
 
 	// ==========================================
@@ -92,18 +95,30 @@ func main() {
 	}
 
 	// ==========================================
-	// Initialize the Core Reverse Proxy
+	// Initialize the Dynamic Reverse Proxy
 	// ==========================================
 	// Define where authorized traffic should be forwarded.
-	targetURL, _ := url.Parse("https://localhost:8443") // The protected internal microservice
 	reverseProxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
-			// Rewrite the request to point to the backend microservice
-			req.URL.Scheme = targetURL.Scheme
-			req.URL.Host = targetURL.Host
-			req.Host = targetURL.Host
+			// Pull the dynamic backend URL from the context
+			targetRaw, ok := req.Context().Value(auth.TargetContextKey).(string)
+			if !ok {
+				log.Println("Error: No target backend found in context")
+				return
+			}
+
+			target, err := url.Parse(targetRaw)
+			if err != nil {
+				log.Printf("Error parsing backend URL %s: %v", targetRaw, err)
+				return
+			}
+
+			// Rewrite the request for the specific microservice
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.Host = target.Host
 		},
-		Transport: mtlsTransport, // Inject our military-grade mTLS transport here!
+		Transport: mtlsTransport,
 	}
 
 	// ==========================================
@@ -131,8 +146,8 @@ func main() {
 
 	log.Println("ZTAP Gateway is listening on port 443 (HTTPS)...")
 	// ZTAP itself listens on TLS using its own server certificates (front-end encryption)
-	err = server.ListenAndServeTLS(os.Getenv("PROXY_KEY_PATH"), os.Getenv("PROXY_KEY_PATH"))
+	err = server.ListenAndServeTLS(os.Getenv("PROXY_CERT_PATH"), os.Getenv("PROXY_KEY_PATH"))
 	if err != nil {
-		log.Fatalf("Fatal: Server crashed: %v", err)
+		log.Fatalf("Fatal Server crashed: %v", err)
 	}
 }

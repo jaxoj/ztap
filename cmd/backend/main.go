@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+
 	log.Printf("Starting Highly Classified Internal Microservice ...")
 
 	// Load the internal CA that signed the ZTAP Proxy's certificate
