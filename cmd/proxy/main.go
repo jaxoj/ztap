@@ -46,7 +46,6 @@ func main() {
 	if err != nil {
 		log.Printf(".ENV file not found %v", err)
 	}
-	log.Println(os.Environ())
 	log.Printf("Initializing Zero-Trust Access Poxy (ZTAP)...")
 
 	// ==========================================
