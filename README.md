@@ -8,11 +8,97 @@ ZTAP solves this by implementing an **Identity-Aware Proxy (IAP)** written in hi
 
 ---
 
-## 2. System Architecture
+## 2. Getting Started & Installation
+
+To run ZTAP locally, you will need to generate cryptographic keys, configure your routing policies, and spin up the isolated container network.
+
+### Prerequisites
+
+* **Docker & Docker Compose** (for the isolated network and Redis cache)
+* **Go 1.24+** (to run the JWT generator tool)
+* **OpenSSL** (to generate the mTLS certificates and RSA keys)
+
+### Step 1: Clone and Prepare the Environment
+
+```bash
+git clone https://github.com/jaxoj/ztap.git
+cd ztap
+mkdir certs
+
+```
+
+### Step 2: Generate Cryptographic Materials
+
+Because ZTAP operates on a "Zero-Trust" model, it requires rigorous cryptographic proofs. You must generate the following files and place them in the `/certs` directory:
+
+1. **Internal CA (`ca.crt`, `ca.key`)**: To sign all internal certificates.
+2. **Proxy mTLS Certs (`ztap_server.crt`, `ztap_server.key`)**: For the proxy to prove its identity to backends.
+3. **IdP RSA Keys (`idp_private.pem`, `idp_public.pem`)**: To sign and verify JWT authorization tokens.
+
+*Crucial Security Step (Linux/macOS):* Ensure the Docker container's non-root user can read these files:
+
+```bash
+chmod 644 certs/*
+chmod 755 certs/
+
+```
+
+### Step 3: Define Routing Policies
+
+Create a `policies.yaml` file in working directory to map RBAC roles to your backend microservices:
+
+```yaml
+rules:
+  - role: "commander"
+    path: "^/api/v1/launch$"
+    methods: ["POST"]
+    backend: "https://your-backend-service:8443"
+
+```
+
+### Step 4: Boot the Fortress
+
+Start the proxy and its stateful Redis cache using Docker Compose:
+
+```bash
+docker-compose up --build -d
+
+```
+
+Check the logs to confirm the engine is running and successfully connected to Redis:
+
+```bash
+docker-compose logs -f proxy-gateway
+# Expected Output: [Info] Proxy listening on :443
+
+```
+
+### Step 5: Generate a Token and Test
+
+Use the included CLI tool to generate a cryptographically valid, short-lived session token:
+
+```bash
+go run scripts/generate_token.go -role="commander"
+
+```
+
+Test the mTLS connection and Layer 7 authorization (replace `<YOUR_TOKEN>` with the generated JWT):
+
+```bash
+curl -v \
+  --cacert certs/ca.crt \
+  --cert certs/client.crt \
+  --key certs/client.key \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
+  -X POST https://localhost/api/v1/launch
+
+```
+
+---
+
+## 3. System Architecture
 
 The architecture follows a decoupled, distributed gateway pattern. ZTAP acts as the single, hardened point of entry for a cluster of independent microservices.
-
-
 
 * **Client:** A user or service requesting access.
 * **ZTAP Proxy:** The high-performance engine that handles TLS termination, RSA cryptographic validation, dynamic regex routing, and mTLS request forwarding.
@@ -23,7 +109,7 @@ The architecture follows a decoupled, distributed gateway pattern. ZTAP acts as 
 
 ---
 
-## 3. Request Flow & Dynamic Routing
+## 4. Request Flow & Dynamic Routing
 
 Every request undergoes a rigorous, microsecond-optimized verification pipeline before reaching a microservice:
 
@@ -35,30 +121,30 @@ Every request undergoes a rigorous, microsecond-optimized verification pipeline 
 
 ---
 
-## 4. Security Model
+## 5. Security Model
 
 Our model relies on the **"Never Trust, Always Verify"** mantra:
 
 * **Cryptographic Paranoia:** TLS 1.3 is strictly enforced. The proxy explicitly drops connections to backends presenting untrusted or self-signed certificates.
 * **Stateless Validation:** Because JWTs are validated via RSA public keys in memory, the proxy does not need to make latent network calls to an IdP for every request.
-* **Immutable Multi-Stage Containers:** Production ZTAP deployments are built using Docker multi-stage builds. The final Alpine container contains **no source code**, no Go compiler, and runs as a restricted, non-root user. 
+* **Immutable Multi-Stage Containers:** Production ZTAP deployments are built using Docker multi-stage builds. The final Alpine container contains **no source code**, no Go compiler, and runs as a restricted, non-root user.
 * **Separation of Concerns:** ZTAP is deployed entirely decoupled from the microservices it protects. Microservice engineering teams manage their own deployments, while Security Administrators update ZTAP's `policies.yaml` to govern access.
 
 ---
 
-## 5. Scaling for Large Military Infrastructure
+## 6. Scaling for Large Military Infrastructure
 
 ZTAP is designed to scale horizontally to protect massive, distributed environments.
 
 * **The Phalanx Pattern (Load Balancing):** Multiple ZTAP container replicas can sit behind a Layer 4 Network Load Balancer (NLB). Go's lightweight goroutines allow a single instance to handle tens of thousands of concurrent mTLS connections.
 * **Redis Clustering:** A distributed Redis cluster ensures that if a commander revokes a compromised token, the blacklist propagates globally in milliseconds, and all ZTAP replicas instantly drop the attacker.
-* **Service Mesh Evolution:** For hyper-classified environments, ZTAP can be compiled into a minimal binary and deployed as a **Sidecar Proxy**. 
+* **Service Mesh Evolution:** For hyper-classified environments, ZTAP can be compiled into a minimal binary and deployed as a **Sidecar Proxy**.
 
 In this topology, East-West traffic between microservices (e.g., Intel Service to Missile Service) is routed through their respective ZTAP sidecars, ensuring Zero-Trust even if the internal network is fully compromised.
 
 ---
 
-## 6. Implementation Roadmap
+## 7. Implementation Roadmap
 
 * **[DONE] Phase 1: Core Proxy:** Build the Go server capable of HTTP forwarding.
 * **[DONE] Phase 2: Identity Validation:** Integrate JWT parsing and RSA-256 signature verification.
@@ -71,8 +157,10 @@ In this topology, East-West traffic between microservices (e.g., Intel Service t
 
 ---
 
-## 7. Future Improvements
+## 8. Future Improvements
 
 * **SPIFFE/SPIRE:** Transitioning from static `.crt` / `.key` files to automated, short-lived workload identities for the mTLS layer.
 * **Hardware-Backed Identity:** Requiring YubiKey or TPM-resident keys for all `commander` level access.
 * **AI Anomaly Detection:** Monitoring request frequency to detect "credential stuffing" or "data exfiltration" attempts in real-time.
+
+---
