@@ -1,0 +1,43 @@
+services:
+  # 1. The Stateful Revocation Cache (Internal only)
+  redis-store:
+    image: redis:7-alpine
+    container_name: ztap_redis
+    networks:
+      - gateway_net
+    expose:
+      - "6379"
+    restart: always # Crucial for production resilience
+
+  # 2. The Zero-Trust API Gateway (ZTAP)
+  proxy-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    container_name: ztap_proxy
+    networks:
+      - gateway_net
+    ports:
+      - "443:443" # The Gateway listens to the outside world
+    volumes:
+      # Mount policies and certificates read-only so they can be updated dynamically
+      - ./certs:/app/certs:ro
+      - ./policies.yaml:/app/policies.yaml:ro
+    environment:
+      - REDIS_STORE_URL=redis://redis-store:6379/0
+      # ADD THESE: Ensure these match the actual filenames in your certs/ folder
+      - RSA_PUBLIC_KEY_PATH=/app/certs/ztap_public.pem
+      - RSA_PRIVATE_KEY_PATH=/app/certs/ztap_private.pem
+      - ROOT_CA_PATH=/app/certs/ca.crt
+      - PROXY_CERT_PATH=/app/certs/proxy.crt
+      - PROXY_KEY_PATH=/app/certs/proxy.key
+      - RBAC_POLICY_PATH=/app/policies.yaml
+    working_dir: /app/cmd/proxy
+    command: ["/app/ztap-proxy"]
+    depends_on:
+      - redis-store
+    restart: always
+
+networks:
+  gateway_net:
+    driver: bridge
