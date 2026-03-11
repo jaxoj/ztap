@@ -4,33 +4,34 @@
 
 The **Zero-Trust Access Proxy (ZTAP)** is a security enforcement node designed to eliminate "implicit trust" within a network. In traditional setups, once an attacker breaches the perimeter, they can move laterally (East-West traffic) because internal services trust each other by default.
 
-ZTAP solves this by implementing an **Identity-Aware Proxy (IAP)**. It intercepts all traffic to microservices, requiring every request to carry a cryptographically signed, short-lived identity token.
+ZTAP solves this by implementing an **Identity-Aware Proxy (IAP)** written in high-performance Go. It intercepts all traffic to microservices, requiring every request to carry a cryptographically signed, short-lived identity token, while dynamically routing traffic using pre-compiled Regular Expressions.
 
 ---
 
 ## 2. System Architecture
 
-The architecture follows a distributed gateway pattern where the ZTAP acts as the single point of entry for a cluster of services.
+The architecture follows a decoupled, distributed gateway pattern. ZTAP acts as the single, hardened point of entry for a cluster of independent microservices.
 
-* **Client:** A user or service requesting access (must support mTLS).
-* **ZTAP Proxy :** The high-performance engine that handles TLS termination, authentication, and request forwarding.
-* **Identity Provider (IdP) / Verification Component:** Validates JWTs or OIDC tokens.
-* **Redis Store:** A high-speed cache for session blacklists, rate-limiting, and short-lived token metadata.
-* **Certificate Authority (CA):** Manages the issuance of internal certificates for mTLS.
-* **Internal Microservices:** Services that only listen for connections encrypted with the CA’s certificates.
+
+
+* **Client:** A user or service requesting access.
+* **ZTAP Proxy:** The high-performance engine that handles TLS termination, RSA cryptographic validation, dynamic regex routing, and mTLS request forwarding.
+* **Identity Provider (IdP):** Issues RSA-signed JWTs. ZTAP only holds the Public Key to mathematically verify signatures offline.
+* **Redis Store:** A stateful, ultra-fast, in-memory cache used for instant session revocation (checking JWT `jti` claims against a blacklist).
+* **Certificate Authority (CA):** Manages the issuance of internal certificates to ensure absolute cryptographic trust.
+* **Internal Microservices:** Completely decoupled backends that *only* listen for connections encrypted with the internal CA’s certificates.
 
 ---
 
-## 3. Request Flow
+## 3. Request Flow & Dynamic Routing
 
-Every request undergoes a rigorous verification pipeline before reaching a microservice:
+Every request undergoes a rigorous, microsecond-optimized verification pipeline before reaching a microservice:
 
-1. **mTLS Handshake:** The client presents a certificate. ZTAP validates it against the internal CA.
-2. **Authentication:** ZTAP extracts the `Authorization: Bearer <token>` header. It checks the token’s signature.
-3. **Session Lookup:** ZTAP queries **Redis** to ensure the token hasn't been revoked or expired globally.
-4. **Device Posture Check:** The proxy evaluates device signals (sent via headers or mTLS extensions) to ensure the device is compliant.
-5. **RBAC Authorization:** The Policy Engine checks if the "Role" inside the token has the "Permission" for the specific `METHOD` and `PATH`.
-6. **Secure Forwarding:** ZTAP initiates a new mTLS connection to the backend microservice and forwards the sanitized request.
+1. **Authentication (Layer 7):** ZTAP extracts the `Authorization: Bearer <token>` header and mathematically verifies the RSA signature using the IdP's Public Key.
+2. **Stateful Session Lookup:** ZTAP queries **Redis** to ensure the specific token ID (`jti`) hasn't been revoked by an administrator.
+3. **Regex-Powered RBAC Authorization:** The Policy Engine compares the token's "Role" against a YAML-defined Routing Table. It uses pre-compiled Regex state machines to match dynamic URL paths (e.g., `^/api/v1/drones/.*$`).
+4. **Context Injection:** If authorized, the engine injects the target backend URL into the HTTP Context.
+5. **Secure Forwarding (Layer 4 mTLS):** The Reverse Proxy Director reads the target from context, initiates a strict TLS 1.3 mTLS connection to the backend microservice, proves its identity via its own client certificate, and forwards the sanitized request.
 
 ---
 
@@ -38,45 +39,40 @@ Every request undergoes a rigorous verification pipeline before reaching a micro
 
 Our model relies on the **"Never Trust, Always Verify"** mantra:
 
-* **Short-lived Tokens:** Tokens expire every 15–60 minutes to minimize the window for stolen credentials.
-* **mTLS Everywhere:** Both "Client-to-Proxy" and "Proxy-to-Service" are encrypted with Mutual TLS, ensuring the identity of the machine itself.
-* **Least Privilege:** Users are only granted the specific scopes (e.g., `read:intel`) required for their mission.
+* **Cryptographic Paranoia:** TLS 1.3 is strictly enforced. The proxy explicitly drops connections to backends presenting untrusted or self-signed certificates.
+* **Stateless Validation:** Because JWTs are validated via RSA public keys in memory, the proxy does not need to make latent network calls to an IdP for every request.
+* **Immutable Multi-Stage Containers:** Production ZTAP deployments are built using Docker multi-stage builds. The final Alpine container contains **no source code**, no Go compiler, and runs as a restricted, non-root user. 
+* **Separation of Concerns:** ZTAP is deployed entirely decoupled from the microservices it protects. Microservice engineering teams manage their own deployments, while Security Administrators update ZTAP's `policies.yaml` to govern access.
 
 ---
 
-## 5. Device Posture Checking Extension
+## 5. Scaling for Large Military Infrastructure
 
-Access is not just about *who* you are, but *what* you are using. ZTAP checks:
+ZTAP is designed to scale horizontally to protect massive, distributed environments.
 
-* **Disk Encryption:** Verified via an endpoint agent signal.
-* **OS Patch Level:** Rejects requests from outdated, vulnerable kernels.
-* **Device Identity:** The client certificate must be stored in a hardware TPM (Trusted Platform Module).
-* **Signal Integration:** If the "Compliance Header" is missing or reports `status=unhealthy`, ZTAP returns a `403 Forbidden`.
+* **The Phalanx Pattern (Load Balancing):** Multiple ZTAP container replicas can sit behind a Layer 4 Network Load Balancer (NLB). Go's lightweight goroutines allow a single instance to handle tens of thousands of concurrent mTLS connections.
+* **Redis Clustering:** A distributed Redis cluster ensures that if a commander revokes a compromised token, the blacklist propagates globally in milliseconds, and all ZTAP replicas instantly drop the attacker.
+* **Service Mesh Evolution:** For hyper-classified environments, ZTAP can be compiled into a minimal binary and deployed as a **Sidecar Proxy**. 
+
+In this topology, East-West traffic between microservices (e.g., Intel Service to Missile Service) is routed through their respective ZTAP sidecars, ensuring Zero-Trust even if the internal network is fully compromised.
 
 ---
 
 ## 6. Implementation Roadmap
 
-* **Phase 1: Core Proxy:** Build the Go server capable of basic HTTP forwarding and Dockerization.
-* **Phase 2: Identity Validation:** Integrate JWT parsing and signature verification.
-* **Phase 3: RBAC Policies:** Implement the logic to map roles to specific API endpoints.
-* **Phase 4: mTLS Integration:** Configure Go's `tls.Config` to require client certificates.
-* **Phase 5: Redis Integration:** Add session revocation and rate-limiting using Redis.
-* **Phase 6: Device Posture:** Implement header-based posture verification and "Emergency Lockdown" triggers.
+* **[DONE] Phase 1: Core Proxy:** Build the Go server capable of HTTP forwarding.
+* **[DONE] Phase 2: Identity Validation:** Integrate JWT parsing and RSA-256 signature verification.
+* **[DONE] Phase 3: Dynamic RBAC Policies:** Implement Regex-based path matching and dynamic backend routing via YAML.
+* **[DONE] Phase 4: mTLS Integration:** Configure Go's `tls.Config` for mutual authentication and connection pooling.
+* **[DONE] Phase 5: Redis Integration:** Add stateful session revocation.
+* **[DONE] Phase 6: Containerization:** Implement secure, multi-stage Dockerfiles and isolated Docker Compose networks.
+* **[PENDING] Phase 7: Device Posture:** Implement header-based posture verification (disk encryption, patch levels) and "Emergency Lockdown" triggers.
+* **[PENDING] Phase 8: Telemetry:** Integrate Prometheus metrics to monitor denial rates and unauthorized access attempts.
 
 ---
 
-## 7. Deployment Architecture
+## 7. Future Improvements
 
-ZTAP is deployed as a **Gateway** at the edge of a service cluster.
-
-* **Networking:** The microservices reside on an isolated Docker network. They *only* accept traffic from the ZTAP container IP.
-* **Service Registration:** New services are added to the ZTAP configuration file, mapping public paths (e.g., `/api/v1/mission`) to internal gRPC/HTTP addresses.
-
----
-
-## 8. Future Improvements
-
-* **SPIFFE/SPIRE:** For automated, short-lived workload identities instead of static mTLS certs.
-* **Hardware-Backed Identity:** Requiring YubiKey or TPM-resident keys for all administrative access.
-* **AI Anomaly Detection:** Monitoring request patterns to detect "credential stuffing" or "data exfiltration" attempts in real-time.
+* **SPIFFE/SPIRE:** Transitioning from static `.crt` / `.key` files to automated, short-lived workload identities for the mTLS layer.
+* **Hardware-Backed Identity:** Requiring YubiKey or TPM-resident keys for all `commander` level access.
+* **AI Anomaly Detection:** Monitoring request frequency to detect "credential stuffing" or "data exfiltration" attempts in real-time.

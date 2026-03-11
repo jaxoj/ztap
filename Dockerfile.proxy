@@ -1,0 +1,45 @@
+# ==========================================
+# Stage 1: The Builder (Heavyweight)
+# ==========================================
+FROM golang:1.24-alpine AS builder
+
+# Set the working directory
+WORKDIR /build
+
+# Cache dependencies first (improves build speed)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the actual source code
+COPY . .
+
+# Build a statically linked binary. 
+# CGO_ENABLED=0 ensures we don't depend on host OS C libraries.
+# -w -s strips debugging information to reduce binary size and surface area.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o ztap-proxy ./cmd/proxy/main.go
+
+# ==========================================
+# Stage 2: The Production Image (Lightweight & Secure)
+# ==========================================
+# We use alpine for a tiny, secure footprint
+FROM alpine:latest
+
+# Create a non-root user for security (Defense in Depth)
+RUN addgroup -S ztap && adduser -S ztap -G ztap
+
+WORKDIR /app
+
+# Copy only the compiled binary from the builder stage
+COPY --from=builder /build/ztap-proxy .
+
+# Ensure the non-root user owns the directory
+RUN chown -R ztap:ztap /app
+
+# Drop root privileges immediately
+USER ztap
+
+# Expose the standard HTTPS port
+EXPOSE 443
+
+# Execute the binary
+CMD ["./ztap-proxy"]
